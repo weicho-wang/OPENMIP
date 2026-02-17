@@ -17,6 +17,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache SuperBuild
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/VTK-build
+            build/ITK-build
+            build/CTK-build
+          key: ${{ runner.os }}-superbuild-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-superbuild-
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -27,7 +38,8 @@ jobs:
             libqt5xmlpatterns5-dev libqt5svg5-dev \
             qtwebengine5-dev qtscript5-dev \
             libqt5x11extras5-dev libxt-dev \
-            libssl-dev
+            libssl-dev \
+            libqt5multimedia5-dev libqt5multimediawidgets5-dev
 
       - name: Environment Snapshot (Linux)
         run: |
@@ -96,12 +108,23 @@ jobs:
 
   build-windows:
     runs-on: windows-2022
-    timeout-minutes: 360
+    timeout-minutes: 420
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Cache SuperBuild
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/VTK-build
+            build/ITK-build
+            build/CTK-build
+          key: ${{ runner.os }}-superbuild-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-superbuild-
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -143,7 +166,7 @@ jobs:
         run: |
           cd build
           cmake --build . --config Release --parallel 4
-        timeout-minutes: 300
+        timeout-minutes: 420
 
       - name: Package OPENMIP (Windows)
         shell: cmd
