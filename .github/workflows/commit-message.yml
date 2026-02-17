@@ -18,6 +18,68 @@ jobs:
   check-commit-message:
     runs-on: ubuntu-latest
     steps:
-      - uses: Slicer/slicer-check-commit-message-action@26db1d4a0580194025a00bff6f5c24a88c0efb9f # v1.0.0
+      - name: Validate commit message prefixes
+        uses: actions/github-script@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const allowedPrefixes = ["BUG", "COMP", "DOC", "ENH", "PERF", "STYLE", "WIP"];
+            const pattern = new RegExp(`^(${allowedPrefixes.join("|")}):\\s+\\S.+`);
+
+            function isMergeCommit(subject) {
+              return subject.startsWith("Merge pull request") || subject.startsWith("Merge branch");
+            }
+
+            function firstLine(message) {
+              return (message || "").split("\n")[0].trim();
+            }
+
+            function validate(subject, label, errors) {
+              if (!pattern.test(subject)) {
+                errors.push(`- ${label}: ${subject || "<empty>"}`);
+              }
+            }
+
+            const errors = [];
+
+            if (context.eventName === "pull_request") {
+              const prTitle = context.payload.pull_request?.title || "";
+              validate(prTitle, "PR title", errors);
+
+              const pullNumber = context.payload.pull_request.number;
+              const commits = await github.paginate(
+                github.rest.pulls.listCommits,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pullNumber,
+                  per_page: 100,
+                }
+              );
+
+              for (const commit of commits) {
+                const subject = firstLine(commit.commit?.message);
+                validate(subject, `commit ${commit.sha.slice(0, 7)}`, errors);
+              }
+            }
+
+            if (context.eventName === "push") {
+              const commits = context.payload.commits || [];
+              for (const commit of commits) {
+                const subject = firstLine(commit.message);
+                if (isMergeCommit(subject)) {
+                  continue;
+                }
+                validate(subject, `commit ${commit.id.slice(0, 7)}`, errors);
+              }
+            }
+
+            if (errors.length > 0) {
+              core.setFailed(
+                [
+                  "Commit message rule violation.",
+                  `Allowed prefixes: ${allowedPrefixes.join(", ")}`,
+                  "Each subject must match: PREFIX: message",
+                  ...errors,
+                ].join("\n")
+              );
+            }

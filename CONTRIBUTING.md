@@ -50,8 +50,7 @@ We encourage all developers to:
 
 ### How to write commit messages ?
 
-Write your commit messages using the standard prefixes for Slicer commit
-messages:
+Write your commit messages using the standard prefixes used in this project:
 
   * `BUG:` Fix for runtime crash or incorrect result
   * `COMP:` Compiler error or warning fix
@@ -60,6 +59,9 @@ messages:
   * `PERF:` Performance improvement
   * `STYLE:` No logic impact (indentation, comments)
   * `WIP:` Work In Progress not ready for merge
+
+These prefixes are automatically validated by the repository workflow
+`.github/workflows/commit-message.yml`.
 
 The body of the message should clearly describe the motivation of the commit
 (**what**, **why**, and **how**). In order to ease the task of reviewing

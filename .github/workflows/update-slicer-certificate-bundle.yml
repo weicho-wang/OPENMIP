@@ -1,9 +1,6 @@
 name: Update Slicer.crt certificate bundle
 
 on:
-  schedule:
-    # Every tuesday at 11.30am UTC (7.30am ET)
-    - cron: "30 11 * * 2"
   workflow_dispatch:
 
 permissions:

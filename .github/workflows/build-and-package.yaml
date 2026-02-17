@@ -2,15 +2,15 @@ name: Build and Package OPENMIP
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:  # 允许手动触发
+    branches: [main, master]
+  workflow_dispatch: # 允许手动触发
 
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360  # Slicer 构建耗时较长
+    timeout-minutes: 360 # Slicer 构建耗时较长
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,12 +109,12 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
-          version: '5.15.2'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_msvc2019_64'
-          modules: 'qtwebengine qtscript'
-          setup-python: 'false'
+          version: "5.15.2"
+          host: "windows"
+          target: "desktop"
+          arch: "win64_msvc2019_64"
+          modules: "qtwebengine qtscript"
+          setup-python: "false"
 
       - name: Install NSIS
         run: choco install nsis
