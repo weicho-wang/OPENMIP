@@ -1,0 +1,263 @@
+name: Build and Package OPENMIP
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360  # Slicer 构建耗时较长
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git subversion build-essential \
+            cmake ninja-build \
+            qtbase5-dev qttools5-dev \
+            libqt5xmlpatterns5-dev libqt5svg5-dev \
+            qtwebengine5-dev qtscript5-dev \
+            libqt5x11extras5-dev libxt-dev \
+            libssl-dev
+
+      - name: Environment Snapshot (Linux)
+        run: |
+          uname -a
+          cmake --version
+          ninja --version
+          df -h
+
+      - name: Configure OPENMIP
+        run: |
+          mkdir -p build
+          cd build
+          cmake \
+            -DCMAKE_BUILD_TYPE:STRING=Release \
+            -DSlicer_MAIN_PROJECT:STRING=SlicerApp \
+            -DSlicer_RELEASE_TYPE:STRING=Stable \
+            -DSlicer_BUILD_DICOM_SUPPORT:BOOL=ON \
+            -DSlicer_BUILD_DIFFUSION_SUPPORT:BOOL=ON \
+            -DSlicer_BUILD_I18N_SUPPORT:BOOL=ON \
+            -GNinja \
+            ..
+
+      - name: Build OPENMIP
+        run: |
+          cd build
+          cmake --build . --parallel 4
+        timeout-minutes: 300
+
+      - name: Package OPENMIP (Linux)
+        run: |
+          cd build/Slicer-build
+          cmake --build . --target package
+        timeout-minutes: 60
+
+      - name: List Package Files (Linux)
+        if: always()
+        run: |
+          ls -lah build/Slicer-build || true
+          find build/Slicer-build -maxdepth 4 -type f \( -name "*.tar.gz" -o -name "*.deb" \) | sort || true
+
+      - name: Upload Linux Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmip-linux-package
+          path: |
+            build/Slicer-build/*.tar.gz
+            build/Slicer-build/*.deb
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload Linux Diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmip-linux-diagnostics
+          path: |
+            build/CMakeCache.txt
+            build/CMakeFiles/CMakeOutput.log
+            build/CMakeFiles/CMakeError.log
+            build/Slicer-build/CMakeCache.txt
+            build/Slicer-build/CMakeFiles/CMakeOutput.log
+            build/Slicer-build/CMakeFiles/CMakeError.log
+            build/Slicer-build/_CPack_Packages/**
+          retention-days: 7
+          if-no-files-found: warn
+
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+          modules: 'qtmultimedia qtwebengine qtxmlpatterns qtscript qtsvg'
+
+      - name: Install NSIS
+        run: choco install nsis
+
+      - name: Environment Snapshot (Windows)
+        shell: powershell
+        run: |
+          cmake --version
+          Get-PSDrive -PSProvider FileSystem
+          Get-ChildItem Env: | Sort-Object Name
+
+      - name: Configure OPENMIP
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          cmake -G "Visual Studio 17 2022" -A x64 ^
+            -DQt5_DIR:PATH=%Qt5_DIR% ^
+            -DCMAKE_BUILD_TYPE:STRING=Release ^
+            -DSlicer_MAIN_PROJECT:STRING=SlicerApp ^
+            -DSlicer_RELEASE_TYPE:STRING=Stable ^
+            ..
+
+      - name: Build OPENMIP
+        shell: cmd
+        run: |
+          cd build
+          cmake --build . --config Release --parallel 4
+        timeout-minutes: 300
+
+      - name: Package OPENMIP (Windows)
+        shell: cmd
+        run: |
+          cd build\Slicer-build
+          cmake --build . --config Release --target PACKAGE
+        timeout-minutes: 60
+
+      - name: List Package Files (Windows)
+        if: always()
+        shell: powershell
+        run: |
+          if (Test-Path build/Slicer-build) {
+            Get-ChildItem -Path build/Slicer-build -Recurse -File -Include *.exe,*.msi,*.zip | Select-Object FullName, Length, LastWriteTime
+          }
+
+      - name: Upload Windows Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmip-windows-installer
+          path: |
+            build/Slicer-build/_CPack_Packages/*/NSIS/*.exe
+            build/Slicer-build/*.exe
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Windows Diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmip-windows-diagnostics
+          path: |
+            build/CMakeCache.txt
+            build/CMakeFiles/CMakeOutput.log
+            build/CMakeFiles/CMakeError.log
+            build/Slicer-build/CMakeCache.txt
+            build/Slicer-build/CMakeFiles/CMakeOutput.log
+            build/Slicer-build/CMakeFiles/CMakeError.log
+            build/Slicer-build/_CPack_Packages/**
+          retention-days: 7
+          if-no-files-found: warn
+
+  build-macos:
+    runs-on: macos-13
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: |
+          brew install \
+            cmake ninja \
+            qt@5 \
+            subversion
+
+      - name: Environment Snapshot (macOS)
+        run: |
+          sw_vers
+          cmake --version
+          ninja --version
+          df -h
+
+      - name: Configure OPENMIP
+        run: |
+          mkdir -p build
+          cd build
+          cmake \
+            -DCMAKE_BUILD_TYPE:STRING=Release \
+            -DSlicer_MAIN_PROJECT:STRING=SlicerApp \
+            -DSlicer_RELEASE_TYPE:STRING=Stable \
+            -DQt5_DIR:PATH=/usr/local/opt/qt@5/lib/cmake/Qt5 \
+            -GNinja \
+            ..
+
+      - name: Build OPENMIP
+        run: |
+          cd build
+          cmake --build . --parallel 4
+        timeout-minutes: 300
+
+      - name: Package OPENMIP (macOS)
+        run: |
+          cd build/Slicer-build
+          cmake --build . --target package
+        timeout-minutes: 60
+
+      - name: List Package Files (macOS)
+        if: always()
+        run: |
+          ls -lah build/Slicer-build || true
+          find build/Slicer-build -maxdepth 4 -type f -name "*.dmg" | sort || true
+
+      - name: Upload macOS Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmip-macos-package
+          path: build/Slicer-build/*.dmg
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload macOS Diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmip-macos-diagnostics
+          path: |
+            build/CMakeCache.txt
+            build/CMakeFiles/CMakeOutput.log
+            build/CMakeFiles/CMakeError.log
+            build/Slicer-build/CMakeCache.txt
+            build/Slicer-build/CMakeFiles/CMakeOutput.log
+            build/Slicer-build/CMakeFiles/CMakeError.log
+            build/Slicer-build/_CPack_Packages/**
+          retention-days: 7
+          if-no-files-found: warn

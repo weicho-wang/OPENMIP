@@ -1,9 +1,9 @@
 
 set(APPLICATION_NAME
-  Slicer
+  OPENMIP
   )
 set(APPLICATION_DISPLAY_NAME
-  "3D Slicer"
+  "OPENMIP"
   )
 
 set(VERSION_MAJOR
@@ -17,20 +17,20 @@ set(VERSION_PATCH
   )
 
 set(DESCRIPTION_SUMMARY
-  "Medical Visualization and Processing Environment for Research"
+  "Multi-platform visualization and image computing"
   )
 set(DESCRIPTION_FILE
   ${Slicer_SOURCE_DIR}/README.md
   )
 
 set(LAUNCHER_SPLASHSCREEN_FILE
-  "${CMAKE_CURRENT_LIST_DIR}/Resources/Images/${APPLICATION_NAME}-SplashScreen.png"
+  "${CMAKE_CURRENT_LIST_DIR}/Resources/Images/Slicer-SplashScreen.png"
   )
 set(APPLE_ICON_FILE
-  "${CMAKE_CURRENT_LIST_DIR}/Resources/${APPLICATION_NAME}.icns"
+  "${CMAKE_CURRENT_LIST_DIR}/Resources/Slicer.icns"
   )
 set(WIN_ICON_FILE
-  "${CMAKE_CURRENT_LIST_DIR}/Resources/${APPLICATION_NAME}.ico"
+  "${CMAKE_CURRENT_LIST_DIR}/Resources/Slicer.ico"
   )
 
 set(LICENSE_FILE
