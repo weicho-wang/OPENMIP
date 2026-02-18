@@ -5,12 +5,12 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
-  workflow_dispatch: # 允许手动触发
+  workflow_dispatch: 
 
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360 # Slicer 构建耗时较长
+    timeout-minutes: 360 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
             qtwebengine5-dev qtscript5-dev \
             libqt5x11extras5-dev libxt-dev \
             libssl-dev \
-            libqt5multimedia5-dev libqt5multimediawidgets5-dev
+            qtmultimedia5-dev
 
       - name: Environment Snapshot (Linux)
         run: |
@@ -106,25 +106,83 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-  build-windows:
+  build-windows-deps:
     runs-on: windows-2022
-    timeout-minutes: 420
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
-      - name: Cache SuperBuild
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: "5.15.2"
+          host: "windows"
+          target: "desktop"
+          arch: "win64_msvc2019_64"
+          modules: "qtwebengine qtscript"
+          setup-python: "false"
+
+      - name: Cache Windows SuperBuild Dependencies
+        id: cache-windows-deps
         uses: actions/cache@v4
         with:
           path: |
             build/VTK-build
             build/ITK-build
             build/CTK-build
-          key: ${{ runner.os }}-superbuild-${{ hashFiles('**/CMakeLists.txt') }}
+          key: windows-superbuild-deps-${{ hashFiles('CMakeLists.txt', 'SuperBuild/*.cmake', 'CMake/*.cmake') }}
           restore-keys: |
-            ${{ runner.os }}-superbuild-
+            windows-superbuild-deps-
+
+      - name: Configure OPENMIP (Windows Dependencies)
+        if: steps.cache-windows-deps.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          cmake -G "Visual Studio 17 2022" -A x64 ^
+            -DQt5_DIR:PATH=%Qt5_DIR% ^
+            -DCMAKE_BUILD_TYPE:STRING=Release ^
+            -DSlicer_MAIN_PROJECT:STRING=SlicerApp ^
+            -DSlicer_RELEASE_TYPE:STRING=Stable ^
+            ..
+
+      - name: Build VTK/ITK/CTK Dependencies
+        if: steps.cache-windows-deps.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          cd build
+          cmake --build . --config Release --target VTK ITK CTK --parallel 4
+        timeout-minutes: 330
+
+      - name: Upload Windows Dependency Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmip-windows-deps
+          path: |
+            build/VTK-build/**
+            build/ITK-build/**
+            build/CTK-build/**
+          retention-days: 7
+          if-no-files-found: error
+
+  build-windows:
+    needs: build-windows-deps
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -142,6 +200,12 @@ jobs:
       - name: Install NSIS
         run: choco install nsis
 
+      - name: Download Windows Dependency Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: openmip-windows-deps
+          path: build
+
       - name: Environment Snapshot (Windows)
         shell: powershell
         run: |
@@ -149,16 +213,19 @@ jobs:
           Get-PSDrive -PSProvider FileSystem
           Get-ChildItem Env: | Sort-Object Name
 
-      - name: Configure OPENMIP
+      - name: Configure OPENMIP (Reuse Dependency Artifact)
         shell: cmd
         run: |
-          mkdir build
+          if not exist build mkdir build
           cd build
           cmake -G "Visual Studio 17 2022" -A x64 ^
             -DQt5_DIR:PATH=%Qt5_DIR% ^
             -DCMAKE_BUILD_TYPE:STRING=Release ^
             -DSlicer_MAIN_PROJECT:STRING=SlicerApp ^
             -DSlicer_RELEASE_TYPE:STRING=Stable ^
+            -DVTK_DIR:PATH=%CD%\VTK-build ^
+            -DITK_DIR:PATH=%CD%\ITK-build ^
+            -DCTK_DIR:PATH=%CD%\CTK-build ^
             ..
 
       - name: Build OPENMIP
@@ -166,7 +233,7 @@ jobs:
         run: |
           cd build
           cmake --build . --config Release --parallel 4
-        timeout-minutes: 420
+        timeout-minutes: 300
 
       - name: Package OPENMIP (Windows)
         shell: cmd
