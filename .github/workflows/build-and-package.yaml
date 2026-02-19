@@ -218,8 +218,19 @@ jobs:
         run: |
           if not exist build mkdir build
           cd build
-          set DEPS_ROOT=%CD%
+          set DEPS_ROOT=
+          if exist %CD%\VTK-build set DEPS_ROOT=%CD%
+          if exist %CD%\..\VTK-build set DEPS_ROOT=%CD%\..
           if exist %CD%\build\VTK-build set DEPS_ROOT=%CD%\build
+          if "%DEPS_ROOT%"=="" (
+            echo ERROR: Could not locate VTK-build/ITK-build/CTK-build directories.
+            echo Current directory: %CD%
+            echo Workspace root listing:
+            dir %CD%\..
+            echo Build directory listing:
+            dir %CD%
+            exit /b 1
+          )
           cmake -G "Visual Studio 17 2022" -A x64 ^
             -DQt5_DIR:PATH=%Qt5_DIR% ^
             -DCMAKE_BUILD_TYPE:STRING=Release ^
