@@ -5,12 +5,12 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360 
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,7 +34,7 @@ jobs:
           sudo apt-get install -y \
             git subversion build-essential \
             cmake ninja-build \
-            qtbase5-dev qttools5-dev \
+            qtbase5-dev qtbase5-private-dev qttools5-dev \
             libqt5xmlpatterns5-dev libqt5svg5-dev \
             qtwebengine5-dev qtscript5-dev \
             libqt5x11extras5-dev libxt-dev \
@@ -204,7 +204,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: openmip-windows-deps
-          path: build
+          path: .
 
       - name: Environment Snapshot (Windows)
         shell: powershell
@@ -218,14 +218,16 @@ jobs:
         run: |
           if not exist build mkdir build
           cd build
+          set DEPS_ROOT=%CD%
+          if exist %CD%\build\VTK-build set DEPS_ROOT=%CD%\build
           cmake -G "Visual Studio 17 2022" -A x64 ^
             -DQt5_DIR:PATH=%Qt5_DIR% ^
             -DCMAKE_BUILD_TYPE:STRING=Release ^
             -DSlicer_MAIN_PROJECT:STRING=SlicerApp ^
             -DSlicer_RELEASE_TYPE:STRING=Stable ^
-            -DVTK_DIR:PATH=%CD%\VTK-build ^
-            -DITK_DIR:PATH=%CD%\ITK-build ^
-            -DCTK_DIR:PATH=%CD%\CTK-build ^
+            -DVTK_DIR:PATH=%DEPS_ROOT%\VTK-build ^
+            -DITK_DIR:PATH=%DEPS_ROOT%\ITK-build ^
+            -DCTK_DIR:PATH=%DEPS_ROOT%\CTK-build ^
             ..
 
       - name: Build OPENMIP
