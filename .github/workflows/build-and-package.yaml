@@ -204,7 +204,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: openmip-windows-deps
-          path: .
+          path: build
 
       - name: Environment Snapshot (Windows)
         shell: powershell
@@ -218,10 +218,7 @@ jobs:
         run: |
           if not exist build mkdir build
           cd build
-          set DEPS_ROOT=
-          if exist %CD%\VTK-build set DEPS_ROOT=%CD%
-          if exist %CD%\..\VTK-build set DEPS_ROOT=%CD%\..
-          if exist %CD%\build\VTK-build set DEPS_ROOT=%CD%\build
+          set DEPS_ROOT=%CD%
           if "%DEPS_ROOT%"=="" (
             echo ERROR: Could not locate VTK-build/ITK-build/CTK-build directories.
             echo Current directory: %CD%
@@ -229,6 +226,21 @@ jobs:
             dir %CD%\..
             echo Build directory listing:
             dir %CD%
+            exit /b 1
+          )
+          if not exist %DEPS_ROOT%\VTK-build (
+            echo ERROR: Missing %DEPS_ROOT%\VTK-build
+            dir %DEPS_ROOT%
+            exit /b 1
+          )
+          if not exist %DEPS_ROOT%\ITK-build (
+            echo ERROR: Missing %DEPS_ROOT%\ITK-build
+            dir %DEPS_ROOT%
+            exit /b 1
+          )
+          if not exist %DEPS_ROOT%\CTK-build (
+            echo ERROR: Missing %DEPS_ROOT%\CTK-build
+            dir %DEPS_ROOT%
             exit /b 1
           )
           cmake -G "Visual Studio 17 2022" -A x64 ^
