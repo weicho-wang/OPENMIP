@@ -135,9 +135,12 @@ jobs:
         with:
           path: |
             build/VTK-build
+            build/VTK
             build/ITK-build
+            build/ITK
             build/CTK-build
-          key: windows-superbuild-deps-${{ hashFiles('CMakeLists.txt', 'SuperBuild/*.cmake', 'CMake/*.cmake') }}
+            build/CTK
+          key: windows-superbuild-deps-${{ hashFiles('**/CMakeLists.txt', 'SuperBuild/**/*.cmake', 'CMake/**/*.cmake') }}
           restore-keys: |
             windows-superbuild-deps-
 
@@ -168,8 +171,14 @@ jobs:
           name: openmip-windows-deps
           path: |
             build/VTK-build/**
+            build/VTK/**
             build/ITK-build/**
+            build/ITK/**
             build/CTK-build/**
+            build/CTK/**
+            !build/VTK/.git/**
+            !build/ITK/.git/**
+            !build/CTK/.git/**
           retention-days: 7
           if-no-files-found: error
 
@@ -220,7 +229,7 @@ jobs:
           cd build
           set DEPS_ROOT=%CD%
           if "%DEPS_ROOT%"=="" (
-            echo ERROR: Could not locate VTK-build/ITK-build/CTK-build directories.
+            echo ERROR: Could not locate dependency root directory (expected VTK-build/VTK, ITK-build/ITK, CTK-build/CTK).
             echo Current directory: %CD%
             echo Workspace root listing:
             dir %CD%\..
@@ -233,14 +242,44 @@ jobs:
             dir %DEPS_ROOT%
             exit /b 1
           )
+          if not exist %DEPS_ROOT%\VTK (
+            echo ERROR: Missing %DEPS_ROOT%\VTK (required by VTK_SOURCE_DIR)
+            dir %DEPS_ROOT%
+            exit /b 1
+          )
+          if not exist %DEPS_ROOT%\VTK\CMake\vtkModule.cmake (
+            echo ERROR: Missing %DEPS_ROOT%\VTK\CMake\vtkModule.cmake
+            dir %DEPS_ROOT%\VTK\CMake
+            exit /b 1
+          )
           if not exist %DEPS_ROOT%\ITK-build (
             echo ERROR: Missing %DEPS_ROOT%\ITK-build
             dir %DEPS_ROOT%
             exit /b 1
           )
+          if not exist %DEPS_ROOT%\ITK (
+            echo ERROR: Missing %DEPS_ROOT%\ITK (required by ITKConfig.cmake includes)
+            dir %DEPS_ROOT%
+            exit /b 1
+          )
+          if not exist %DEPS_ROOT%\ITK\CMake\ITKModuleAPI.cmake (
+            echo ERROR: Missing %DEPS_ROOT%\ITK\CMake\ITKModuleAPI.cmake
+            dir %DEPS_ROOT%\ITK\CMake
+            exit /b 1
+          )
           if not exist %DEPS_ROOT%\CTK-build (
             echo ERROR: Missing %DEPS_ROOT%\CTK-build
             dir %DEPS_ROOT%
+            exit /b 1
+          )
+          if not exist %DEPS_ROOT%\CTK (
+            echo ERROR: Missing %DEPS_ROOT%\CTK (CTK source tree)
+            dir %DEPS_ROOT%
+            exit /b 1
+          )
+          if not exist %DEPS_ROOT%\CTK\CMakeLists.txt (
+            echo ERROR: Missing %DEPS_ROOT%\CTK\CMakeLists.txt
+            dir %DEPS_ROOT%\CTK
             exit /b 1
           )
           cmake -G "Visual Studio 17 2022" -A x64 ^
@@ -249,6 +288,7 @@ jobs:
             -DSlicer_MAIN_PROJECT:STRING=SlicerApp ^
             -DSlicer_RELEASE_TYPE:STRING=Stable ^
             -DVTK_DIR:PATH=%DEPS_ROOT%\VTK-build ^
+            -DVTK_SOURCE_DIR:PATH=%DEPS_ROOT%\VTK ^
             -DITK_DIR:PATH=%DEPS_ROOT%\ITK-build ^
             -DCTK_DIR:PATH=%DEPS_ROOT%\CTK-build ^
             ..
