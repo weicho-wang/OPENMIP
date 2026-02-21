@@ -129,26 +129,10 @@ jobs:
           modules: "qtwebengine qtscript"
           setup-python: "false"
 
-      - name: Cache Windows SuperBuild Dependencies
-        id: cache-windows-deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            build/VTK-build
-            build/VTK
-            build/ITK-build
-            build/ITK
-            build/CTK-build
-            build/CTK
-          key: windows-superbuild-deps-${{ hashFiles('**/CMakeLists.txt', 'SuperBuild/**/*.cmake', 'CMake/**/*.cmake') }}
-          restore-keys: |
-            windows-superbuild-deps-
-
       - name: Configure OPENMIP (Windows Dependencies)
-        if: steps.cache-windows-deps.outputs.cache-hit != 'true'
         shell: cmd
         run: |
-          mkdir build
+          if not exist build mkdir build
           cd build
           cmake -G "Visual Studio 17 2022" -A x64 ^
             -DQt5_DIR:PATH=%Qt5_DIR% ^
@@ -158,7 +142,6 @@ jobs:
             ..
 
       - name: Build VTK/ITK/CTK Dependencies
-        if: steps.cache-windows-deps.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cd build
@@ -228,6 +211,9 @@ jobs:
           if not exist build mkdir build
           cd build
           set DEPS_ROOT=%CD%
+          if exist %DEPS_ROOT%\build\VTK-build (
+            set DEPS_ROOT=%DEPS_ROOT%\build
+          )
           if "%DEPS_ROOT%"=="" (
             echo ERROR: Could not locate dependency root directory (expected VTK-build/VTK, ITK-build/ITK, CTK-build/CTK).
             echo Current directory: %CD%
