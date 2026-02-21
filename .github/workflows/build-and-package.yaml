@@ -129,19 +129,48 @@ jobs:
           modules: "qtwebengine qtscript"
           setup-python: "false"
 
+      - name: Cache Windows Dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/VTK-build
+            build/VTK
+            build/ITK-build
+            build/ITK
+            build/CTK-build
+            build/CTK
+          key: windows-deps-${{ hashFiles('SuperBuild.cmake', 'CMakeLists.txt') }}
+          restore-keys: |
+            windows-deps-
+
       - name: Configure OPENMIP (Windows Dependencies)
-        shell: cmd
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        shell: powershell
         run: |
-          if not exist build mkdir build
-          cd build
-          cmake -G "Visual Studio 17 2022" -A x64 ^
-            -DQt5_DIR:PATH=%Qt5_DIR% ^
-            -DCMAKE_BUILD_TYPE:STRING=Release ^
-            -DSlicer_MAIN_PROJECT:STRING=SlicerApp ^
-            -DSlicer_RELEASE_TYPE:STRING=Stable ^
-            ..
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory "build" | Out-Null }
+          $cmakeArgs = @(
+            "-G", "Visual Studio 17 2022",
+            "-A", "x64",
+            "-DQt5_DIR:PATH=$env:Qt5_DIR",
+            "-DCMAKE_BUILD_TYPE:STRING=Release",
+            "-DSlicer_MAIN_PROJECT:STRING=SlicerApp",
+            "-DSlicer_RELEASE_TYPE:STRING=Stable",
+            "-DSlicer_BUILD_DICOM_SUPPORT:BOOL=ON",
+            "-DSlicer_BUILD_DIFFUSION_SUPPORT:BOOL=ON",
+            "-DSlicer_BUILD_I18N_SUPPORT:BOOL=ON",
+            ".."
+          )
+          Push-Location build
+          try {
+            & cmake @cmakeArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
 
       - name: Build VTK/ITK/CTK Dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cd build
@@ -190,13 +219,13 @@ jobs:
           setup-python: "false"
 
       - name: Install NSIS
-        run: choco install nsis
+        run: choco install nsis --no-progress
 
       - name: Download Windows Dependency Artifact
         uses: actions/download-artifact@v4
         with:
           name: openmip-windows-deps
-          path: build
+          path: .
 
       - name: Environment Snapshot (Windows)
         shell: powershell
@@ -206,78 +235,69 @@ jobs:
           Get-ChildItem Env: | Sort-Object Name
 
       - name: Configure OPENMIP (Reuse Dependency Artifact)
-        shell: cmd
+        shell: powershell
         run: |
-          if not exist build mkdir build
-          cd build
-          set DEPS_ROOT=%CD%
-          if exist %DEPS_ROOT%\build\VTK-build (
-            set DEPS_ROOT=%DEPS_ROOT%\build
+          # Artifact was uploaded with build/ prefix preserved, downloaded to workspace root.
+          # So dependencies land at: build\VTK-build, build\VTK, build\ITK-build, etc.
+          $depsRoot = Join-Path $PWD "build"
+
+          $requiredPaths = @(
+            "$depsRoot\VTK-build",
+            "$depsRoot\VTK",
+            "$depsRoot\VTK\CMake\vtkModule.cmake",
+            "$depsRoot\ITK-build",
+            "$depsRoot\ITK",
+            "$depsRoot\ITK\CMake\ITKModuleAPI.cmake",
+            "$depsRoot\CTK-build",
+            "$depsRoot\CTK",
+            "$depsRoot\CTK\CMakeLists.txt"
           )
-          if "%DEPS_ROOT%"=="" (
-            echo ERROR: Could not locate dependency root directory (expected VTK-build/VTK, ITK-build/ITK, CTK-build/CTK).
-            echo Current directory: %CD%
-            echo Workspace root listing:
-            dir %CD%\..
-            echo Build directory listing:
-            dir %CD%
-            exit /b 1
+
+          $failed = $false
+          foreach ($p in $requiredPaths) {
+            if (-not (Test-Path $p)) {
+              Write-Host "ERROR: Missing $p"
+              $parent = Split-Path $p -Parent
+              if (Test-Path $parent) {
+                Write-Host "Contents of $parent :"
+                Get-ChildItem $parent | Format-Table Name, LastWriteTime | Out-String | Write-Host
+              } else {
+                Write-Host "Parent directory $parent also does not exist."
+                Write-Host "Contents of $depsRoot :"
+                Get-ChildItem $depsRoot -ErrorAction SilentlyContinue | Format-Table Name | Out-String | Write-Host
+              }
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory "build" | Out-Null }
+
+          $cmakeArgs = @(
+            "-G", "Visual Studio 17 2022",
+            "-A", "x64",
+            "-DQt5_DIR:PATH=$env:Qt5_DIR",
+            "-DCMAKE_BUILD_TYPE:STRING=Release",
+            "-DSlicer_MAIN_PROJECT:STRING=SlicerApp",
+            "-DSlicer_RELEASE_TYPE:STRING=Stable",
+            "-DSlicer_BUILD_DICOM_SUPPORT:BOOL=ON",
+            "-DSlicer_BUILD_DIFFUSION_SUPPORT:BOOL=ON",
+            "-DSlicer_BUILD_I18N_SUPPORT:BOOL=ON",
+            "-DVTK_DIR:PATH=$depsRoot\VTK-build",
+            "-DVTK_SOURCE_DIR:PATH=$depsRoot\VTK",
+            "-DITK_DIR:PATH=$depsRoot\ITK-build",
+            "-DCTK_DIR:PATH=$depsRoot\CTK-build",
+            ".."
           )
-          if not exist %DEPS_ROOT%\VTK-build (
-            echo ERROR: Missing %DEPS_ROOT%\VTK-build
-            dir %DEPS_ROOT%
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\VTK (
-            echo ERROR: Missing %DEPS_ROOT%\VTK (required by VTK_SOURCE_DIR)
-            dir %DEPS_ROOT%
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\VTK\CMake\vtkModule.cmake (
-            echo ERROR: Missing %DEPS_ROOT%\VTK\CMake\vtkModule.cmake
-            dir %DEPS_ROOT%\VTK\CMake
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\ITK-build (
-            echo ERROR: Missing %DEPS_ROOT%\ITK-build
-            dir %DEPS_ROOT%
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\ITK (
-            echo ERROR: Missing %DEPS_ROOT%\ITK (required by ITKConfig.cmake includes)
-            dir %DEPS_ROOT%
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\ITK\CMake\ITKModuleAPI.cmake (
-            echo ERROR: Missing %DEPS_ROOT%\ITK\CMake\ITKModuleAPI.cmake
-            dir %DEPS_ROOT%\ITK\CMake
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\CTK-build (
-            echo ERROR: Missing %DEPS_ROOT%\CTK-build
-            dir %DEPS_ROOT%
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\CTK (
-            echo ERROR: Missing %DEPS_ROOT%\CTK (CTK source tree)
-            dir %DEPS_ROOT%
-            exit /b 1
-          )
-          if not exist %DEPS_ROOT%\CTK\CMakeLists.txt (
-            echo ERROR: Missing %DEPS_ROOT%\CTK\CMakeLists.txt
-            dir %DEPS_ROOT%\CTK
-            exit /b 1
-          )
-          cmake -G "Visual Studio 17 2022" -A x64 ^
-            -DQt5_DIR:PATH=%Qt5_DIR% ^
-            -DCMAKE_BUILD_TYPE:STRING=Release ^
-            -DSlicer_MAIN_PROJECT:STRING=SlicerApp ^
-            -DSlicer_RELEASE_TYPE:STRING=Stable ^
-            -DVTK_DIR:PATH=%DEPS_ROOT%\VTK-build ^
-            -DVTK_SOURCE_DIR:PATH=%DEPS_ROOT%\VTK ^
-            -DITK_DIR:PATH=%DEPS_ROOT%\ITK-build ^
-            -DCTK_DIR:PATH=%DEPS_ROOT%\CTK-build ^
-            ..
+
+          Push-Location build
+          try {
+            Write-Host "Running: cmake $cmakeArgs"
+            & cmake @cmakeArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
 
       - name: Build OPENMIP
         shell: cmd
@@ -335,6 +355,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Install Dependencies
         run: |
@@ -358,6 +379,9 @@ jobs:
             -DCMAKE_BUILD_TYPE:STRING=Release \
             -DSlicer_MAIN_PROJECT:STRING=SlicerApp \
             -DSlicer_RELEASE_TYPE:STRING=Stable \
+            -DSlicer_BUILD_DICOM_SUPPORT:BOOL=ON \
+            -DSlicer_BUILD_DIFFUSION_SUPPORT:BOOL=ON \
+            -DSlicer_BUILD_I18N_SUPPORT:BOOL=ON \
             -DQt5_DIR:PATH=/usr/local/opt/qt@5/lib/cmake/Qt5 \
             -GNinja \
             ..
