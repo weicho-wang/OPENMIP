@@ -30,16 +30,25 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git subversion build-essential \
-            cmake ninja-build \
-            qtbase5-dev qtbase5-private-dev qttools5-dev \
-            libqt5xmlpatterns5-dev libqt5svg5-dev \
-            qtwebengine5-dev qtscript5-dev \
-            libqt5x11extras5-dev libxt-dev \
-            libssl-dev \
-            qtmultimedia5-dev
+          set -e
+          for i in 1 2 3; do
+            sudo apt-get update && break
+            if [ "$i" -eq 3 ]; then exit 1; fi
+            sleep 10
+          done
+          for i in 1 2 3; do
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              git subversion build-essential \
+              cmake ninja-build \
+              qtbase5-dev qtbase5-private-dev qttools5-dev \
+              libqt5xmlpatterns5-dev libqt5svg5-dev \
+              qtwebengine5-dev qtscript5-dev \
+              libqt5x11extras5-dev libxt-dev \
+              libssl-dev \
+              qtmultimedia5-dev && break
+            if [ "$i" -eq 3 ]; then exit 1; fi
+            sleep 10
+          done
 
       - name: Environment Snapshot (Linux)
         run: |
@@ -177,17 +186,38 @@ jobs:
           cmake --build . --config Release --target VTK ITK CTK --parallel 4
         timeout-minutes: 330
 
+      - name: Validate deps before upload
+        shell: powershell
+        run: |
+          $paths = @(
+            "build/VTK-build",
+            "build/VTK",
+            "build/ITK-build",
+            "build/ITK",
+            "build/CTK-build",
+            "build/CTK"
+          )
+          $missing = @()
+          foreach ($p in $paths) {
+            if (-not (Test-Path $p)) { $missing += $p }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing: $($missing -join ', ')"
+            exit 1
+          }
+          Get-ChildItem build | Format-Table Name, Length, LastWriteTime
+
       - name: Upload Windows Dependency Artifact
         uses: actions/upload-artifact@v4
         with:
           name: openmip-windows-deps
           path: |
-            build/VTK-build/**
-            build/VTK/**
-            build/ITK-build/**
-            build/ITK/**
-            build/CTK-build/**
-            build/CTK/**
+            build/VTK-build
+            build/VTK
+            build/ITK-build
+            build/ITK
+            build/CTK-build
+            build/CTK
             !build/VTK/.git/**
             !build/ITK/.git/**
             !build/CTK/.git/**
@@ -219,13 +249,74 @@ jobs:
           setup-python: "false"
 
       - name: Install NSIS
-        run: choco install nsis --no-progress
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              choco install nsis --no-progress --yes
+              break
+            } catch {
+              if ($i -eq 3) { throw }
+              Start-Sleep -Seconds 15
+            }
+          }
 
       - name: Download Windows Dependency Artifact
         uses: actions/download-artifact@v4
         with:
           name: openmip-windows-deps
-          path: .
+          path: ${{ github.workspace }}/build
+
+      - name: Verify downloaded deps
+        shell: powershell
+        run: |
+          if (-not (Test-Path "build")) {
+            Write-Error "Deps artifact missing: build/ not found in workspace."
+            Get-ChildItem . | Format-Table Name, LastWriteTime
+            exit 1
+          }
+
+          Write-Host "=== Debug: top-level under build ==="
+          Get-ChildItem build -Force | Select-Object Name, Mode, LastWriteTime | Format-Table -AutoSize
+
+          Write-Host "=== Debug: depth-2 directories under build ==="
+          Get-ChildItem build -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+            Select-Object FullName, LastWriteTime |
+            Format-Table -AutoSize
+
+          Write-Host "=== Debug: key marker files (first 20) ==="
+          Get-ChildItem build -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -in @("vtkModule.cmake", "ITKModuleAPI.cmake", "CMakeLists.txt", "CMakeCache.txt")
+            } |
+            Select-Object -First 20 FullName, Length, LastWriteTime |
+            Format-Table -AutoSize
+
+          $requiredPaths = @(
+            "build/VTK-build",
+            "build/VTK",
+            "build/VTK/CMake/vtkModule.cmake",
+            "build/ITK-build",
+            "build/ITK",
+            "build/ITK/CMake/ITKModuleAPI.cmake",
+            "build/CTK-build",
+            "build/CTK",
+            "build/CTK/CMakeLists.txt"
+          )
+
+          $missing = @()
+          foreach ($p in $requiredPaths) {
+            if (-not (Test-Path $p)) { $missing += $p }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing downloaded dependency paths: $($missing -join ', ')"
+            Get-ChildItem build -ErrorAction SilentlyContinue | Format-Table Name, LastWriteTime
+            exit 1
+          }
+
+          Get-ChildItem build | Format-Table Name, LastWriteTime
 
       - name: Environment Snapshot (Windows)
         shell: powershell
@@ -237,7 +328,7 @@ jobs:
       - name: Configure OPENMIP (Reuse Dependency Artifact)
         shell: powershell
         run: |
-          # Artifact was uploaded with build/ prefix preserved, downloaded to workspace root.
+          # Artifact is downloaded to ${GITHUB_WORKSPACE}/build.
           # So dependencies land at: build\VTK-build, build\VTK, build\ITK-build, etc.
           $depsRoot = Join-Path $PWD "build"
 
@@ -359,10 +450,20 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          brew install \
-            cmake ninja \
-            qt@5 \
-            subversion
+          set -e
+          for i in 1 2 3; do
+            brew update && break
+            if [ "$i" -eq 3 ]; then exit 1; fi
+            sleep 10
+          done
+          for i in 1 2 3; do
+            brew install \
+              cmake ninja \
+              qt@5 \
+              subversion && break
+            if [ "$i" -eq 3 ]; then exit 1; fi
+            sleep 10
+          done
 
       - name: Environment Snapshot (macOS)
         run: |
@@ -375,6 +476,7 @@ jobs:
         run: |
           mkdir -p build
           cd build
+          QT5_CMAKE_DIR="$(brew --prefix qt@5)/lib/cmake/Qt5"
           cmake \
             -DCMAKE_BUILD_TYPE:STRING=Release \
             -DSlicer_MAIN_PROJECT:STRING=SlicerApp \
@@ -382,7 +484,7 @@ jobs:
             -DSlicer_BUILD_DICOM_SUPPORT:BOOL=ON \
             -DSlicer_BUILD_DIFFUSION_SUPPORT:BOOL=ON \
             -DSlicer_BUILD_I18N_SUPPORT:BOOL=ON \
-            -DQt5_DIR:PATH=/usr/local/opt/qt@5/lib/cmake/Qt5 \
+            -DQt5_DIR:PATH=${QT5_CMAKE_DIR} \
             -GNinja \
             ..
 
