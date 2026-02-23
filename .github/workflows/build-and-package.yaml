@@ -168,6 +168,9 @@ jobs:
             "-DSlicer_BUILD_DICOM_SUPPORT:BOOL=ON",
             "-DSlicer_BUILD_DIFFUSION_SUPPORT:BOOL=ON",
             "-DSlicer_BUILD_I18N_SUPPORT:BOOL=ON",
+            "-DSlicer_USE_PYTHONQT:BOOL=ON",
+            "-DSlicer_USE_PYTHONQT_WITH_OPENSSL:BOOL=ON",
+            "-DSlicer_USE_SYSTEM_python:BOOL=OFF",
             ".."
           )
           Push-Location build
@@ -374,6 +377,9 @@ jobs:
             "-DSlicer_BUILD_DICOM_SUPPORT:BOOL=ON",
             "-DSlicer_BUILD_DIFFUSION_SUPPORT:BOOL=ON",
             "-DSlicer_BUILD_I18N_SUPPORT:BOOL=ON",
+            "-DSlicer_USE_PYTHONQT:BOOL=ON",
+            "-DSlicer_USE_PYTHONQT_WITH_OPENSSL:BOOL=ON",
+            "-DSlicer_USE_SYSTEM_python:BOOL=OFF",
             "-DVTK_DIR:PATH=$depsRoot\VTK-build",
             "-DVTK_SOURCE_DIR:PATH=$depsRoot\VTK",
             "-DITK_DIR:PATH=$depsRoot\ITK-build",
@@ -397,12 +403,89 @@ jobs:
           cmake --build . --config Release --parallel 4
         timeout-minutes: 300
 
+      - name: Verify VTK Python artifacts before packaging
+        shell: powershell
+        run: |
+          $candidateRoots = @(
+            "build/VTK-build",
+            "build/python-install"
+          )
+
+          $vtkInitCandidates = @()
+          foreach ($root in $candidateRoots) {
+            if (Test-Path $root) {
+              $vtkInitCandidates += Get-ChildItem -Path $root -Recurse -File -Filter "__init__.py" -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match "vtkmodules" }
+            }
+          }
+
+          if ($vtkInitCandidates.Count -eq 0) {
+            Write-Error "vtkmodules was not found under expected build roots (build/VTK-build, build/python-install)."
+            foreach ($root in $candidateRoots) {
+              if (Test-Path $root) {
+                Write-Host "=== Listing potential python dirs under $root ==="
+                Get-ChildItem -Path $root -Recurse -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match "Python|site-packages|vtk" } |
+                  Select-Object -First 80 FullName |
+                  Format-Table -AutoSize
+              }
+            }
+            exit 1
+          }
+
+          Write-Host "Found vtkmodules init files:"
+          $vtkInitCandidates | Select-Object -First 20 FullName | Format-Table -AutoSize
+
       - name: Package OPENMIP (Windows)
         shell: cmd
         run: |
           cd build\Slicer-build
           cmake --build . --config Release --target PACKAGE
         timeout-minutes: 60
+
+      - name: Smoke test packaged Python vtk import
+        shell: powershell
+        run: |
+          $packageRoot = "build/Slicer-build/_CPack_Packages"
+          if (-not (Test-Path $packageRoot)) {
+            Write-Error "CPack output not found: $packageRoot"
+            exit 1
+          }
+
+          $pythonSlicer = Get-ChildItem -Path $packageRoot -Recurse -File -Filter "PythonSlicer.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $pythonSlicer) {
+            Write-Error "PythonSlicer.exe not found in CPack staging tree."
+            Get-ChildItem -Path $packageRoot -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match "OPENMIP|Slicer|LauncherSettings|python" } |
+              Select-Object -First 80 FullName |
+              Format-Table -AutoSize
+            exit 1
+          }
+
+          $launcherSettings = Get-ChildItem -Path $packageRoot -Recurse -File -Filter "*LauncherSettings.ini" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $launcherSettings) {
+            Write-Error "LauncherSettings.ini not found in CPack staging tree."
+            exit 1
+          }
+
+          Write-Host "Using Python launcher: $($pythonSlicer.FullName)"
+          & "$($pythonSlicer.FullName)" -c "import vtk, slicer; print(vtk.VTK_VERSION)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "PythonSlicer smoke test failed: unable to import vtk/slicer."
+            exit $LASTEXITCODE
+          }
+
+          $iniContent = Get-Content -Path $launcherSettings.FullName -ErrorAction Stop
+          if (-not ($iniContent -match "bin/Python")) {
+            Write-Error "LauncherSettings missing bin/Python in PYTHONPATH: $($launcherSettings.FullName)"
+            exit 1
+          }
+          if (-not ($iniContent -match "site-packages")) {
+            Write-Warning "LauncherSettings does not contain site-packages explicitly: $($launcherSettings.FullName)"
+          }
+          Write-Host "Launcher settings check passed: $($launcherSettings.FullName)"
 
       - name: List Package Files (Windows)
         if: always()
