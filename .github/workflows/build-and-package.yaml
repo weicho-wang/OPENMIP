@@ -149,9 +149,9 @@ jobs:
             build/ITK
             build/CTK-build
             build/CTK
-          key: windows-deps-${{ hashFiles('SuperBuild.cmake', 'CMakeLists.txt') }}
+          key: windows-deps-v2-${{ hashFiles('SuperBuild.cmake', 'CMakeLists.txt', '.github/workflows/build-and-package.yaml') }}
           restore-keys: |
-            windows-deps-
+            windows-deps-v2-
 
       - name: Configure OPENMIP (Windows Dependencies)
         if: steps.deps-cache.outputs.cache-hit != 'true'
@@ -171,6 +171,7 @@ jobs:
             "-DSlicer_USE_PYTHONQT:BOOL=ON",
             "-DSlicer_USE_PYTHONQT_WITH_OPENSSL:BOOL=ON",
             "-DSlicer_USE_SYSTEM_python:BOOL=OFF",
+            "-DVTK_WRAP_PYTHON:BOOL=ON",
             ".."
           )
           Push-Location build
@@ -380,10 +381,7 @@ jobs:
             "-DSlicer_USE_PYTHONQT:BOOL=ON",
             "-DSlicer_USE_PYTHONQT_WITH_OPENSSL:BOOL=ON",
             "-DSlicer_USE_SYSTEM_python:BOOL=OFF",
-            "-DVTK_DIR:PATH=$depsRoot\VTK-build",
-            "-DVTK_SOURCE_DIR:PATH=$depsRoot\VTK",
-            "-DITK_DIR:PATH=$depsRoot\ITK-build",
-            "-DCTK_DIR:PATH=$depsRoot\CTK-build",
+            "-DVTK_WRAP_PYTHON:BOOL=ON",
             ".."
           )
 
@@ -463,12 +461,29 @@ jobs:
             exit 1
           }
 
-          $launcherSettings = Get-ChildItem -Path $packageRoot -Recurse -File -Filter "*LauncherSettings.ini" -ErrorAction SilentlyContinue |
+          $launcherSettings = Get-ChildItem -Path $packageRoot -Recurse -File -Filter "PythonSlicerLauncherSettings.ini" -ErrorAction SilentlyContinue |
             Select-Object -First 1
+          if (-not $launcherSettings) {
+            $launcherSettings = Get-ChildItem -Path $packageRoot -Recurse -File -Filter "*LauncherSettings.ini" -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
           if (-not $launcherSettings) {
             Write-Error "LauncherSettings.ini not found in CPack staging tree."
             exit 1
           }
+
+          $vtkModuleInit = Get-ChildItem -Path $packageRoot -Recurse -File -Filter "__init__.py" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "vtkmodules" } |
+            Select-Object -First 1
+          if (-not $vtkModuleInit) {
+            Write-Error "vtkmodules was not found in packaged CPack staging tree."
+            Get-ChildItem -Path $packageRoot -Recurse -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "site-packages|Python|vtk" } |
+              Select-Object -First 120 FullName |
+              Format-Table -AutoSize
+            exit 1
+          }
+          Write-Host "Found packaged vtkmodules at: $($vtkModuleInit.Directory.FullName)"
 
           Write-Host "Using Python launcher: $($pythonSlicer.FullName)"
           & "$($pythonSlicer.FullName)" -c "import vtk, slicer; print(vtk.VTK_VERSION)"
@@ -478,8 +493,8 @@ jobs:
           }
 
           $iniContent = Get-Content -Path $launcherSettings.FullName -ErrorAction Stop
-          if (-not ($iniContent -match "bin/Python")) {
-            Write-Error "LauncherSettings missing bin/Python in PYTHONPATH: $($launcherSettings.FullName)"
+          if (-not ($iniContent -match "bin/Python|lib/site-packages|Lib/site-packages")) {
+            Write-Error "LauncherSettings missing expected Python module path (bin/Python or site-packages): $($launcherSettings.FullName)"
             exit 1
           }
           if (-not ($iniContent -match "site-packages")) {
