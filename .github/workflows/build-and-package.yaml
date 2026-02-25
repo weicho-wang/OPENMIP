@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Cache SuperBuild
         uses: actions/cache@v4
@@ -128,6 +129,15 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Setup MSYS2 tools
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            git
+            make
+            patch
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
@@ -222,9 +232,6 @@ jobs:
             build/ITK
             build/CTK-build
             build/CTK
-            !build/VTK/.git/**
-            !build/ITK/.git/**
-            !build/CTK/.git/**
           retention-days: 7
           if-no-files-found: error
 
@@ -241,6 +248,15 @@ jobs:
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup MSYS2 tools
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            git
+            make
+            patch
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
