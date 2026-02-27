@@ -182,6 +182,9 @@ jobs:
             "-DSlicer_USE_PYTHONQT_WITH_OPENSSL:BOOL=ON",
             "-DSlicer_USE_SYSTEM_python:BOOL=OFF",
             "-DVTK_WRAP_PYTHON:BOOL=ON",
+            "-DCMAKE_USE_WIN32_THREADS_INIT:BOOL=TRUE",
+            "-DCMAKE_USE_PTHREADS_INIT:BOOL=FALSE",
+            "-DTHREADS_PREFER_PTHREAD_FLAG:BOOL=FALSE",
             ".."
           )
           Push-Location build
@@ -232,6 +235,8 @@ jobs:
             build/ITK
             build/CTK-build
             build/CTK
+            build/CMakeCache.txt
+            build/CMakeFiles/
           retention-days: 7
           if-no-files-found: error
 
@@ -287,6 +292,13 @@ jobs:
         with:
           name: openmip-windows-deps
           path: ${{ github.workspace }}/build
+
+      - name: Configure git for disconnected build
+        shell: cmd
+        run: |
+          git config --global safe.directory *
+          git config --global advice.detachedHead false
+          git config --global core.autocrlf false
 
       - name: Verify downloaded deps
         shell: powershell
@@ -347,6 +359,9 @@ jobs:
 
       - name: Configure OPENMIP (Reuse Dependency Artifact)
         shell: powershell
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_ASKPASS: "echo"
         run: |
           # Artifact is downloaded to ${GITHUB_WORKSPACE}/build.
           # So dependencies land at: build\VTK-build, build\VTK, build\ITK-build, etc.
@@ -384,6 +399,28 @@ jobs:
 
           if (-not (Test-Path "build")) { New-Item -ItemType Directory "build" | Out-Null }
 
+          # Reinitialise any bare/detached git worktrees that CTK's ExternalProject
+          # left behind in the artifact so that cmake's EP UPDATE_COMMAND does not
+          # fail with "fatal: not a git repository".
+          foreach ($srcDir in @("build/CTK", "build/VTK", "build/ITK")) {
+            if (Test-Path $srcDir) {
+              Get-ChildItem -Path $srcDir -Recurse -Depth 3 -File -Filter ".git" -ErrorAction SilentlyContinue | ForEach-Object {
+                $gitFile = $_.FullName
+                $content = Get-Content $gitFile -Raw -ErrorAction SilentlyContinue
+                # If .git is a gitdir pointer file, replace the broken absolute path
+                # with a dummy in-place .git dir so cmake EP UPDATE will not crash.
+                if ($content -match 'gitdir:') {
+                  $dir = $_.DirectoryName
+                  Write-Host "Reinitialising detached gitdir: $gitFile"
+                  Remove-Item $gitFile -Force
+                  Push-Location $dir
+                  git init -q
+                  Pop-Location
+                }
+              }
+            }
+          }
+
           $cmakeArgs = @(
             "-G", "Visual Studio 17 2022",
             "-A", "x64",
@@ -398,6 +435,15 @@ jobs:
             "-DSlicer_USE_PYTHONQT_WITH_OPENSSL:BOOL=ON",
             "-DSlicer_USE_SYSTEM_python:BOOL=OFF",
             "-DVTK_WRAP_PYTHON:BOOL=ON",
+            # Prevent ExternalProject from issuing git-update commands against
+            # the archived source trees (PythonQt-source, QtTesting, etc.).
+            # CMake 3.18+ honours this per-project; the SuperBuild may expose a
+            # wrapper variable; setting both maximises compatibility.
+            "-DFETCHCONTENT_UPDATES_DISCONNECTED:BOOL=TRUE",
+            "-DFETCHCONTENT_FULLY_DISCONNECTED:BOOL=FALSE",
+            "-DCMAKE_USE_WIN32_THREADS_INIT:BOOL=TRUE",
+            "-DCMAKE_USE_PTHREADS_INIT:BOOL=FALSE",
+            "-DTHREADS_PREFER_PTHREAD_FLAG:BOOL=FALSE",
             ".."
           )
 
